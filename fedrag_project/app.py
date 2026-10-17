@@ -1,6 +1,7 @@
 """Interactive Web Presentation Dashboard for Federated RAG Research.
 
-Wraps all 5 backend research phases:
+Wraps all 5 backend research phases with dynamic dataset switching:
+- Dataset Switching: Synthetic Dataset vs Real Kaggle Dataset
 - Phase 1: Base Federated Retrieval Pipeline
 - Phase 2: Membership Inference Attack (MIA) Baseline
 - Phase 3: MIRABEL Baseline Defense Reproduction
@@ -27,11 +28,11 @@ from src.defense.mirabel import MIRABELDefense
 from src.router.adaptive_router import QueryAnalyzerAndRouter
 from src.ui_helpers import (
     CLIENT_METADATA,
-    PRESET_QUERIES,
     build_phase_comparison_chart,
     build_score_distribution_chart,
-    get_cached_federated_system,
     get_dataset_overview_df,
+    get_presets_for_dataset,
+    load_selected_dataset,
     run_live_mia_evaluation,
     run_single_search,
 )
@@ -111,17 +112,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Cached Backend System Initialization
-# -----------------------------------------------------------------------------
-coordinator, clients, splits = get_cached_federated_system()
-
-# -----------------------------------------------------------------------------
-# Sidebar Navigation
+# Sidebar Navigation & Dynamic Dataset Selection
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/shield.png", width=64)
     st.title("FedRAG Explorer")
     st.caption("Privacy-Preserving Federated RAG Engine")
+    st.markdown("---")
+
+    # Dataset switcher toggle
+    dataset_choice = st.radio(
+        "📁 Select Dataset Collection:",
+        ["Synthetic Dataset", "Real Kaggle Dataset"],
+        help="Switch between synthetic baseline data and real-world Kaggle text data.",
+        index=0,
+    )
     st.markdown("---")
 
     selected_page = st.radio(
@@ -139,11 +144,19 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.markdown("### 🌐 Cluster Telemetry")
+
+# Dynamically initialize/re-index clients and coordinator based on selected dataset
+coordinator, clients, splits = load_selected_dataset(dataset_choice)
+presets = get_presets_for_dataset(dataset_choice)
+total_docs = sum(len(docs) for docs in splits.values())
+
+with st.sidebar:
+    st.markdown("### 🌐 Active Cluster Telemetry")
+    st.markdown(f"- **Corpus:** `{dataset_choice}`")
+    st.markdown(f"- **Total Documents:** `{total_docs} Docs (Non-IID)`")
     st.markdown("- **Clients Registered:** `4 Nodes`")
     st.markdown("- **Embedding Model:** `all-MiniLM-L6-v2`")
     st.markdown("- **FAISS Index Type:** `IndexFlatIP (Cosine)`")
-    st.markdown("- **Total Documents:** `32 Docs (Non-IID)`")
 
 
 # =============================================================================
@@ -161,6 +174,8 @@ if selected_page == "Overview & System Architecture":
         """,
         unsafe_allow_html=True,
     )
+
+    st.info(f"📁 **Currently Active Corpus:** `{dataset_choice}` ({total_docs} documents across 4 non-IID partitions). Switch anytime via the sidebar.")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Federated Clients", "4 Nodes", "Non-IID Partitions")
@@ -223,8 +238,8 @@ if selected_page == "Overview & System Architecture":
             """
         )
 
-    with st.expander("📂 Explore Non-IID Client Document Partitions (32 Records)"):
-        st.dataframe(get_dataset_overview_df(), use_container_width=True)
+    with st.expander(f"📂 Explore {dataset_choice} Partitions ({total_docs} Records)"):
+        st.dataframe(get_dataset_overview_df(splits=splits, dataset_type=dataset_choice), use_container_width=True)
 
 
 # =============================================================================
@@ -232,6 +247,7 @@ if selected_page == "Overview & System Architecture":
 # =============================================================================
 elif selected_page == "Phase 1: Base Federated RAG Pipeline":
     st.title("⚡ Phase 1: Base Federated Retrieval Pipeline")
+    st.caption(f"Currently indexing: **{dataset_choice}**")
     st.markdown(
         "Demonstrates dense embedding search via **FAISS IndexFlatIP** across 4 distributed client partitions "
         "with coordinator query broadcasting and global candidate ranking."
@@ -239,8 +255,8 @@ elif selected_page == "Phase 1: Base Federated RAG Pipeline":
 
     col_q1, col_q2 = st.columns([2, 1])
     with col_q1:
-        preset_choice = st.selectbox("Select Preset Query:", list(PRESET_QUERIES.keys()), index=0)
-        custom_query = st.text_input("Or Enter Custom Query:", value=PRESET_QUERIES[preset_choice]["query"])
+        preset_choice = st.selectbox("Select Preset Query:", list(presets.keys()), index=0)
+        custom_query = st.text_input("Or Enter Custom Query:", value=presets[preset_choice]["query"])
     with col_q2:
         top_k_client = st.slider("Candidates per Client (top_k_per_client):", 1, 8, 3)
         global_k = st.slider("Global Retrieved Context (global_top_k):", 1, 8, 5)
@@ -260,7 +276,7 @@ elif selected_page == "Phase 1: Base Federated RAG Pipeline":
         if not df_res.empty:
             top_client = df_res.iloc[0]["Client"]
             top_score = float(df_res.iloc[0]["Raw Score"])
-            expected_cid = PRESET_QUERIES.get(preset_choice, {}).get("expected_client_id")
+            expected_cid = presets.get(preset_choice, {}).get("expected_client_id")
 
             c_metric1, c_metric2, c_metric3 = st.columns(3)
             c_metric1.metric("Top Ranked Document", df_res.iloc[0]["Doc ID"])
@@ -289,6 +305,7 @@ elif selected_page == "Phase 1: Base Federated RAG Pipeline":
 # =============================================================================
 elif selected_page == "Phase 2: Membership Inference Attack (MIA) Baseline":
     st.title("🕵️ Phase 2: Membership Inference Attack (MIA) Baseline")
+    st.caption(f"Targeting Member corpus: **{dataset_choice}** ({total_docs} members)")
     st.markdown(
         "Evaluates the privacy vulnerability of the undefended retrieval engine. The adversary crafts "
         "probing queries (verbatim text and salient clauses) to extract private membership signals."
@@ -306,9 +323,9 @@ elif selected_page == "Phase 2: Membership Inference Attack (MIA) Baseline":
         unsafe_allow_html=True,
     )
 
-    if st.button("⚔️ Run Live MIA Attack Suite (64 Targets)", type="primary"):
+    if st.button("⚔️ Run Live MIA Attack Suite", type="primary"):
         prog = st.progress(0, text="Initializing MIA Probes...")
-        results = run_live_mia_evaluation(coordinator=coordinator, defense=None, progress_bar=prog)
+        results = run_live_mia_evaluation(coordinator=coordinator, splits=splits, defense=None, progress_bar=prog)
         prog.empty()
 
         col1, col2, col3, col4 = st.columns(4)
@@ -334,6 +351,7 @@ elif selected_page == "Phase 2: Membership Inference Attack (MIA) Baseline":
 # =============================================================================
 elif selected_page == "Phase 3: MIRABEL Baseline Defense Reproduction":
     st.title("🛡️ Phase 3: MIRABEL Baseline Defense Reproduction")
+    st.caption(f"Currently active on: **{dataset_choice}**")
     st.markdown(
         "Reproduces MIRABEL (threshold-based query inspection). When candidate similarity meets or exceeds "
         "threshold $\\tau$, MIRABEL triggers suppression by **completely deleting/purging** the top document."
@@ -345,9 +363,10 @@ elif selected_page == "Phase 3: MIRABEL Baseline Defense Reproduction":
     colA, colB = st.columns(2)
     with colA:
         st.markdown("#### Test High-Relevance Query against MIRABEL")
+        default_test_query = list(presets.values())[0]["query"]
         test_q = st.text_input(
             "Query with high semantic overlap:",
-            value=PRESET_QUERIES["Healthcare: Diabetes Management"]["query"],
+            value=default_test_query,
         )
         if st.button("Inspect Query Response"):
             df_undef, _, _ = run_single_search(coordinator, test_q, defense=None)
@@ -390,6 +409,7 @@ elif selected_page == "Phase 3: MIRABEL Baseline Defense Reproduction":
 # =============================================================================
 elif selected_page == "Phase 4: Proposed ACD-FedRAG Defense & Ablations":
     st.title("🔬 Phase 4: Proposed ACD-FedRAG Defense & Ablations")
+    st.caption(f"Currently active on: **{dataset_choice}**")
     st.markdown(
         r"Demonstrates our proposed **Adaptive Cross-Client Dispersion Defense (ACD-FedRAG)**. "
         r"Instead of deleting documents, ACD-FedRAG detects outlier score cliffs ($\Delta_{\text{local}}$ and $\Delta_{\text{cross}}$) "
@@ -419,9 +439,10 @@ elif selected_page == "Phase 4: Proposed ACD-FedRAG Defense & Ablations":
     else:
         active_defense = None
 
+    default_probe_query = list(presets.values())[-1]["query"]
     demo_query = st.text_input(
         "Enter Probing or Search Query:",
-        value=PRESET_QUERIES["Verbatim Probing Attack (MED-002)"]["query"],
+        value=default_probe_query,
     )
 
     if st.button("🧪 Test Retrieval & Defense Execution"):
@@ -456,6 +477,7 @@ elif selected_page == "Phase 4: Proposed ACD-FedRAG Defense & Ablations":
 # =============================================================================
 elif selected_page == "Phase 5: Query-Sensitive Adaptive Routing & System Efficiency":
     st.title("🧭 Phase 5: Query-Sensitive Adaptive Routing")
+    st.caption(f"Currently active on: **{dataset_choice}**")
     st.markdown(
         "Demonstrates dynamic intent-aware client routing. The **QueryAnalyzerAndRouter** classifies queries into "
         "Single-Domain (selective broadcast) vs Multi-Domain / Probing (full broadcast fallback) to reduce network payload by 50%."
@@ -498,6 +520,7 @@ elif selected_page == "Phase 5: Query-Sensitive Adaptive Routing & System Effici
 # =============================================================================
 elif selected_page == "Consolidated Benchmark & Research Summary":
     st.title("📊 Consolidated Benchmark & Research Summary")
+    st.caption(f"Dataset Evaluation Context: **{dataset_choice}**")
     st.markdown(
         "Unified evaluation of all 5 research phases illustrating the complete trajectory: "
         "from vulnerability identification to baseline defense failure, our proposed ACD-FedRAG defense, and adaptive routing."

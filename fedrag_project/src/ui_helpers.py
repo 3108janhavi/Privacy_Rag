@@ -1,7 +1,8 @@
 """UI Helper functions interfacing backend Federated RAG modules with Streamlit.
 
-Provides cached initialization, live query execution, attack evaluation,
-data formatting into pandas DataFrames, and Plotly visualization builders.
+Provides cached dataset loader supporting Synthetic and Real Kaggle datasets,
+live query execution, attack evaluation, data formatting into pandas DataFrames,
+and Plotly visualization builders.
 """
 
 from __future__ import annotations
@@ -15,7 +16,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from data.prepare_data import DEFAULT_SPLITS_PATH, load_client_splits
+from data.prepare_data import (
+    DEFAULT_SPLITS_PATH,
+    KAGGLE_SPLITS_PATH,
+    create_or_load_kaggle_dataset,
+    load_client_splits,
+)
 from run_phase2_attack import SYNTHETIC_NON_MEMBERS
 from src.attacks.mia_base import MembershipBasedAttack
 from src.client import ClientNode
@@ -33,7 +39,7 @@ CLIENT_METADATA: Dict[int, Dict[str, str]] = {
     4: {"domain": "General Knowledge / History", "badge": "📜 History", "color": "#8B5CF6"},
 }
 
-PRESET_QUERIES: Dict[str, Dict[str, Any]] = {
+SYNTHETIC_PRESET_QUERIES: Dict[str, Dict[str, Any]] = {
     "Healthcare: Diabetes Management": {
         "query": "What are recommended clinical treatments and management for type 2 diabetes?",
         "expected_client_id": 1,
@@ -66,11 +72,66 @@ PRESET_QUERIES: Dict[str, Dict[str, Any]] = {
     },
 }
 
+KAGGLE_PRESET_QUERIES: Dict[str, Dict[str, Any]] = {
+    "Healthcare: SGLT2 Inhibitors & Myocardial Infarction": {
+        "query": "Clinical study evaluating SGLT2 inhibitors and acute ST-elevation myocardial infarction drug-eluting stents",
+        "expected_client_id": 1,
+        "domain": "Healthcare / Medical",
+    },
+    "Education: Generative AI Tutoring & Peer Grading": {
+        "query": "Empirical study on peer assessment accuracy in MOOCs and generative AI tutoring assistants in computer science",
+        "expected_client_id": 2,
+        "domain": "Education / Academics",
+    },
+    "Industrial: NASA Turbofan RUL & SCADA Anomaly": {
+        "query": "NASA turbofan engine C-MAPSS dataset analysis for remaining useful life and SCADA telemetry anomaly detection",
+        "expected_client_id": 3,
+        "domain": "Industrial / Engineering",
+    },
+    "History: Congress of Vienna & Gutenberg Press": {
+        "query": "The Congress of Vienna reorganization of European geopolitics and Gutenberg movable type printing press in Mainz",
+        "expected_client_id": 4,
+        "domain": "General Knowledge / History",
+    },
+    "Multi-Domain: Engineering Education & Industrial Analytics": {
+        "query": "Quasi-experimental evaluation of engineering laboratory flipped classrooms using turbofan dataset analytics",
+        "expected_client_id": None,
+        "domain": "Multi-Domain",
+    },
+    "Verbatim Probing Attack (KAG-MED-001)": {
+        "query": "A 58-year-old male presenting with acute ST-elevation myocardial infarction underwent primary percutaneous coronary intervention with drug-eluting stent implantation in the left anterior descending artery.",
+        "expected_client_id": 1,
+        "domain": "Healthcare / Medical (Probe)",
+    },
+}
 
-@st.cache_resource(show_spinner="Initializing Federated RAG Engine & Embedding Model...")
-def get_cached_federated_system() -> Tuple[FederatedCoordinator, List[ClientNode], Dict[int, List[Dict[str, Any]]]]:
-    """Initializes and caches ClientNodes and FederatedCoordinator to optimize UI performance."""
-    splits = load_client_splits(DEFAULT_SPLITS_PATH)
+PRESET_QUERIES = SYNTHETIC_PRESET_QUERIES
+
+
+def get_presets_for_dataset(dataset_type: str = "Synthetic Dataset") -> Dict[str, Dict[str, Any]]:
+    """Returns preset queries tailored to the active dataset."""
+    if dataset_type == "Real Kaggle Dataset":
+        return KAGGLE_PRESET_QUERIES
+    return SYNTHETIC_PRESET_QUERIES
+
+
+@st.cache_resource(show_spinner="Switching Dataset & Initializing Federated Nodes...")
+def load_selected_dataset(
+    dataset_type: str = "Synthetic Dataset",
+) -> Tuple[FederatedCoordinator, List[ClientNode], Dict[int, List[Dict[str, Any]]]]:
+    """Initializes and caches ClientNodes and FederatedCoordinator for the selected dataset.
+
+    Args:
+        dataset_type: 'Synthetic Dataset' or 'Real Kaggle Dataset'.
+
+    Returns:
+        Tuple: (FederatedCoordinator, List[ClientNode], loaded_splits_dict)
+    """
+    if dataset_type == "Real Kaggle Dataset":
+        splits = create_or_load_kaggle_dataset(KAGGLE_SPLITS_PATH)
+    else:
+        splits = load_client_splits(DEFAULT_SPLITS_PATH)
+
     clients: List[ClientNode] = []
     shared_model = None
 
@@ -86,9 +147,17 @@ def get_cached_federated_system() -> Tuple[FederatedCoordinator, List[ClientNode
     return coordinator, clients, splits
 
 
-def get_dataset_overview_df() -> pd.DataFrame:
-    """Returns a DataFrame summarizing the 4 client domain document sets."""
-    splits = load_client_splits(DEFAULT_SPLITS_PATH)
+def get_dataset_overview_df(
+    splits: Optional[Dict[int, List[Dict[str, Any]]]] = None,
+    dataset_type: str = "Synthetic Dataset",
+) -> pd.DataFrame:
+    """Returns a DataFrame summarizing the 4 client domain document sets for the active dataset."""
+    if splits is None:
+        if dataset_type == "Real Kaggle Dataset":
+            splits = create_or_load_kaggle_dataset(KAGGLE_SPLITS_PATH)
+        else:
+            splits = load_client_splits(DEFAULT_SPLITS_PATH)
+
     rows = []
     for cid, docs in splits.items():
         meta = CLIENT_METADATA.get(cid, {})
@@ -149,11 +218,14 @@ def run_single_search(
 
 def run_live_mia_evaluation(
     coordinator: FederatedCoordinator,
+    splits: Optional[Dict[int, List[Dict[str, Any]]]] = None,
     defense: Optional[Any] = None,
     progress_bar: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Runs the MembershipBasedAttack suite across 32 members and 32 non-members."""
-    splits = load_client_splits(DEFAULT_SPLITS_PATH)
+    """Runs the MembershipBasedAttack suite across members of the active dataset and non-members."""
+    if splits is None:
+        splits = load_client_splits(DEFAULT_SPLITS_PATH)
+
     all_members = [doc for docs in splits.values() for doc in docs]
     non_members = SYNTHETIC_NON_MEMBERS
 
