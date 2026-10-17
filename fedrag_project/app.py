@@ -46,17 +46,48 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.markdown(
-    """
-    <style>
-    /* Metric Card Styling */
-    div[data-testid="stMetric"] {
-        background-color: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        padding: 14px 18px;
-        border-radius: 10px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+# Custom CSS for dark mode metric card visibility
+st.markdown("""
+<style>
+    /* Metric Card Container Styling */
+    div[data-testid="stMetric"], .metric-card, div[data-testid="stVerticalBlock"] > div > div[style*="background-color: white"] {
+        background-color: #1E293B !important; /* Dark slate background */
+        border: 1px solid #334155 !important;
+        border-radius: 10px !important;
+        padding: 15px !important;
     }
+    
+    /* Metric Label (Title above the number) */
+    div[data-testid="stMetricLabel"] label, div[data-testid="stMetricLabel"] p {
+        color: #94A3B8 !important; /* Light slate gray */
+        font-weight: 600 !important;
+        font-size: 14px !important;
+    }
+    
+    /* Metric Value (The big number/text inside) */
+    div[data-testid="stMetricValue"] div {
+        color: #F8FAFC !important; /* Crisp white */
+        font-size: 28px !important;
+        font-weight: 700 !important;
+    }
+
+    /* Target generic white cards if raw HTML/markdown cards are used */
+    div[style*="background-color: white"], div[style*="background: white"], .card-box {
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
+        border: 1px solid #334155 !important;
+        border-radius: 10px !important;
+        padding: 20px !important;
+        margin-bottom: 16px !important;
+    }
+    div[style*="background-color: white"] h1, 
+    div[style*="background-color: white"] h2, 
+    div[style*="background-color: white"] h3, 
+    div[style*="background-color: white"] p,
+    .card-box p, .card-box b {
+        color: #F8FAFC !important;
+    }
+
     .badge-pill {
         display: inline-block;
         padding: 4px 10px;
@@ -76,18 +107,8 @@ st.markdown(
         border-radius: 12px;
         margin-bottom: 25px;
     }
-    .card-box {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 16px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+</style>
+""", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # Cached Backend System Initialization
