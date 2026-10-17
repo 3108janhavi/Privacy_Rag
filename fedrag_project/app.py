@@ -50,27 +50,43 @@ st.set_page_config(
 # Custom CSS for dark mode metric card visibility
 st.markdown("""
 <style>
-    /* Metric Card Container Styling */
-    div[data-testid="stMetric"], .metric-card, div[data-testid="stVerticalBlock"] > div > div[style*="background-color: white"] {
-        background-color: #1E293B !important; /* Dark slate background */
+    /* Metric Container Cards */
+    div[data-testid="stMetric"], .metric-card {
+        background-color: #1E293B !important; /* Slate dark background */
         border: 1px solid #334155 !important;
         border-radius: 10px !important;
-        padding: 15px !important;
+        padding: 16px !important;
     }
     
-    /* Metric Label (Title above the number) */
-    div[data-testid="stMetricLabel"] label, div[data-testid="stMetricLabel"] p {
-        color: #94A3B8 !important; /* Light slate gray */
+    /* Metric Title / Label (FIX FOR DARK INVISIBLE TEXT) */
+    div[data-testid="stMetricLabel"],
+    div[data-testid="stMetricLabel"] label,
+    div[data-testid="stMetricLabel"] p,
+    div[data-testid="stMetricLabel"] span,
+    div[data-testid="stMetricLabel"] div {
+        color: #94A3B8 !important; /* Bright Slate Gray/White */
         font-weight: 600 !important;
         font-size: 14px !important;
+        opacity: 1 !important;
     }
     
-    /* Metric Value (The big number/text inside) */
-    div[data-testid="stMetricValue"] div {
-        color: #F8FAFC !important; /* Crisp white */
-        font-size: 28px !important;
+    /* Main Value Text inside Card */
+    div[data-testid="stMetricValue"],
+    div[data-testid="stMetricValue"] div,
+    div[data-testid="stMetricValue"] p,
+    div[data-testid="stMetricValue"] span {
+        color: #FFFFFF !important; /* Pure White */
+        font-size: 26px !important;
         font-weight: 700 !important;
     }
+
+    /* Delta Indicators if present */
+    div[data-testid="stMetricDelta"] div,
+    div[data-testid="stMetricDelta"] span,
+    div[data-testid="stMetricDelta"] p {
+        font-size: 13px !important;
+    }
+
 
     /* Target generic white cards if raw HTML/markdown cards are used */
     div[style*="background-color: white"], div[style*="background: white"], .card-box {
