@@ -37,6 +37,27 @@ from src.ui_helpers import (
     run_single_search,
 )
 
+# Preset Sample Queries for Demonstration
+PRESET_QUERIES = {
+    "Real Kaggle Dataset": {
+        "🟢 Single-Domain: Healthcare": "Clinical study evaluating SGLT2 inhibitors in patients with type 2 diabetes mellitus and heart failure",
+        "🟢 Single-Domain: Education": "Predicting university student academic probation using institutional canvas LMS clickstream telemetry",
+        "🟢 Single-Domain: Industrial": "NASA turbofan engine C-MAPSS degradation dataset analysis demonstrates recurrent neural network remaining useful life",
+        "🟢 Single-Domain: History": "The Bretton Woods Conference of 1944 established the International Monetary Fund",
+        "🔴 Verbatim Probe (Healthcare)": "A 58-year-old male presenting with acute ST-elevation myocardial infarction underwent primary percutaneous coronary intervention",
+        "🔴 Verbatim Probe (Industrial)": "SCADA telemetry log anomaly detection for municipal water treatment facility identifies anomalous valve pressure surges",
+        "🟡 Multi-Domain Query": "Application of generative AI tutoring assistants and computer science algorithms in medical diagnosis and industrial telemetry"
+    },
+    "Synthetic Dataset": {
+        "🟢 Single-Domain: Healthcare": "Recommended clinical treatments and management strategies for type 2 diabetes",
+        "🟢 Single-Domain: Education": "Cognitive load theory and formative assessment strategies in online degree programs",
+        "🟢 Single-Domain: Industrial": "Predictive maintenance vibration analysis for industrial CNC machinery and bearings",
+        "🟢 Single-Domain: History": "The fall of the Western Roman Empire and historical events of the Renaissance",
+        "🔴 Verbatim Probe": "Recommended clinical treatments and management strategies for type 2 diabetes include continuous glucose monitoring",
+        "🟡 Multi-Domain Query": "Impact of cognitive load theory in medical diagnosis and industrial machinery"
+    }
+}
+
 # -----------------------------------------------------------------------------
 # Streamlit App Configuration & Styling
 # -----------------------------------------------------------------------------
@@ -143,6 +164,7 @@ with st.sidebar:
         ["Synthetic Dataset", "Real Kaggle Dataset"],
         help="Switch between synthetic baseline data and real-world Kaggle text data.",
         index=0,
+        key="dataset_choice",
     )
     st.markdown("---")
 
@@ -272,49 +294,102 @@ elif selected_page == "Phase 1: Base Federated RAG Pipeline":
 
     col_q1, col_q2 = st.columns([2, 1])
     with col_q1:
-        preset_choice = st.selectbox("Select Preset Query:", list(presets.keys()), index=0)
-        custom_query = st.text_input("Or Enter Custom Query:", value=presets[preset_choice]["query"])
+        current_dataset = st.session_state.get("dataset_choice", dataset_choice)
+        queries_dict = PRESET_QUERIES.get(current_dataset, PRESET_QUERIES["Real Kaggle Dataset"])
+
+        preset_options = ["-- Custom Query --"] + list(queries_dict.keys())
+        if st.session_state.get("phase1_preset_select") not in preset_options:
+            st.session_state["phase1_preset_select"] = preset_options[0]
+
+        selected_preset = st.selectbox(
+            "💡 Select a Preset Sample Query (or type custom text below):",
+            options=preset_options,
+            index=0,
+            key="phase1_preset_select",
+        )
+
+        default_text = queries_dict[selected_preset] if selected_preset != "-- Custom Query --" else ""
+
+        user_query = st.text_input(
+            "Enter Query String:",
+            value=default_text,
+            placeholder="Type custom query or select a preset above...",
+        )
+
+        # Quick sample scenario buttons
+        st.caption("Quick Scenarios for Demonstration:")
+        b1, b2, b3, b4 = st.columns(4)
+        with b1:
+            if st.button("🏥 Healthcare", key="btn_p1_hc", use_container_width=True):
+                st.session_state["phase1_preset_select"] = "🟢 Single-Domain: Healthcare"
+                st.rerun()
+        with b2:
+            if st.button("⚙️ Industrial", key="btn_p1_ind", use_container_width=True):
+                st.session_state["phase1_preset_select"] = "🟢 Single-Domain: Industrial"
+                st.rerun()
+        with b3:
+            if st.button("🔴 Verbatim Probe", key="btn_p1_pr", use_container_width=True):
+                probe_key = next((k for k in queries_dict if "Probe" in k), list(queries_dict.keys())[0])
+                st.session_state["phase1_preset_select"] = probe_key
+                st.rerun()
+        with b4:
+            if st.button("🟡 Multi-Domain", key="btn_p1_md", use_container_width=True):
+                st.session_state["phase1_preset_select"] = "🟡 Multi-Domain Query"
+                st.rerun()
+
     with col_q2:
         top_k_client = st.slider("Candidates per Client (top_k_per_client):", 1, 8, 3)
         global_k = st.slider("Global Retrieved Context (global_top_k):", 1, 8, 5)
 
     if st.button("🚀 Execute Federated Search", type="primary"):
-        df_res, meta, latency = run_single_search(
-            coordinator=coordinator,
-            query=custom_query,
-            top_k_per_client=top_k_client,
-            global_top_k=global_k,
-            defense=None,
-            router=None,
-        )
-
-        st.markdown(f"**Execution Completed in `{latency:.2f} ms`**")
-
-        if not df_res.empty:
-            top_client = df_res.iloc[0]["Client"]
-            top_score = float(df_res.iloc[0]["Raw Score"])
-            expected_cid = presets.get(preset_choice, {}).get("expected_client_id")
-
-            c_metric1, c_metric2, c_metric3 = st.columns(3)
-            c_metric1.metric("Top Ranked Document", df_res.iloc[0]["Doc ID"])
-            c_metric2.metric("Top Match Client", top_client)
-            c_metric3.metric("Top Cosine Score", f"{top_score:.4f}")
-
-            # Routing validation flag
-            if expected_cid is not None:
-                matched = f"Client {expected_cid}" in top_client
-                if matched:
-                    st.success(f"✅ Domain Routing Verified: Top document originated from expected Client {expected_cid}.")
-                else:
-                    st.info(f"ℹ️ Cross-domain top result: Expected Client {expected_cid}, got {top_client}.")
-
-            st.markdown("### 📋 Merged Candidate Context Table")
-            st.dataframe(
-                df_res[["Rank", "Doc ID", "Client", "Domain", "Similarity Score", "Document Snippet"]],
-                use_container_width=True,
-            )
+        if not user_query.strip():
+            st.warning("⚠️ Please select a preset sample query or enter a custom query.")
         else:
-            st.warning("No documents retrieved.")
+            df_res, meta, latency = run_single_search(
+                coordinator=coordinator,
+                query=user_query,
+                top_k_per_client=top_k_client,
+                global_top_k=global_k,
+                defense=None,
+                router=None,
+            )
+
+            st.markdown(f"**Execution Completed in `{latency:.2f} ms`**")
+
+            if not df_res.empty:
+                top_client = df_res.iloc[0]["Client"]
+                top_score = float(df_res.iloc[0]["Raw Score"])
+
+                expected_cid = None
+                if "Healthcare" in selected_preset:
+                    expected_cid = 1
+                elif "Education" in selected_preset:
+                    expected_cid = 2
+                elif "Industrial" in selected_preset:
+                    expected_cid = 3
+                elif "History" in selected_preset:
+                    expected_cid = 4
+
+                c_metric1, c_metric2, c_metric3 = st.columns(3)
+                c_metric1.metric("Top Ranked Document", df_res.iloc[0]["Doc ID"])
+                c_metric2.metric("Top Match Client", top_client)
+                c_metric3.metric("Top Cosine Score", f"{top_score:.4f}")
+
+                # Routing validation flag
+                if expected_cid is not None:
+                    matched = f"Client {expected_cid}" in top_client
+                    if matched:
+                        st.success(f"✅ Domain Routing Verified: Top document originated from expected Client {expected_cid}.")
+                    else:
+                        st.info(f"ℹ️ Cross-domain top result: Expected Client {expected_cid}, got {top_client}.")
+
+                st.markdown("### 📋 Merged Candidate Context Table")
+                st.dataframe(
+                    df_res[["Rank", "Doc ID", "Client", "Domain", "Similarity Score", "Document Snippet"]],
+                    use_container_width=True,
+                )
+            else:
+                st.warning("No documents retrieved.")
 
 
 # =============================================================================
@@ -456,24 +531,60 @@ elif selected_page == "Phase 4: Proposed ACD-FedRAG Defense & Ablations":
     else:
         active_defense = None
 
-    default_probe_query = list(presets.values())[-1]["query"]
-    demo_query = st.text_input(
-        "Enter Probing or Search Query:",
-        value=default_probe_query,
+    current_dataset = st.session_state.get("dataset_choice", dataset_choice)
+    queries_dict = PRESET_QUERIES.get(current_dataset, PRESET_QUERIES["Real Kaggle Dataset"])
+
+    preset_options_p4 = ["-- Custom Query --"] + list(queries_dict.keys())
+    if st.session_state.get("phase4_preset_select") not in preset_options_p4:
+        st.session_state["phase4_preset_select"] = preset_options_p4[0]
+
+    selected_preset_p4 = st.selectbox(
+        "💡 Select a Preset Sample Query (or type custom text below):",
+        options=preset_options_p4,
+        index=0,
+        key="phase4_preset_select",
     )
 
-    if st.button("🧪 Test Retrieval & Defense Execution"):
-        df_out, meta_out, lat = run_single_search(coordinator, demo_query, defense=active_defense)
+    default_text_p4 = queries_dict[selected_preset_p4] if selected_preset_p4 != "-- Custom Query --" else ""
 
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.metric("Defense Action Applied?", "YES (Demoted)" if meta_out["defense_triggered"] else "NO")
-            if not df_out.empty:
-                st.metric("Top Result Retained?", df_out.iloc[0]["Doc ID"])
-                st.metric("Top Score After Action", df_out.iloc[0]["Similarity Score"])
-        with col2:
-            st.markdown("### Returned Top Document Context")
-            st.dataframe(df_out[["Rank", "Doc ID", "Client", "Similarity Score", "Document Snippet"]], use_container_width=True)
+    demo_query = st.text_input(
+        "Enter Probing or Search Query:",
+        value=default_text_p4,
+        placeholder="Type custom query or select a preset above...",
+    )
+
+    # Quick scenario buttons for Phase 4
+    st.caption("Quick Scenarios for Demonstration:")
+    p4_b1, p4_b2, p4_b3 = st.columns(3)
+    with p4_b1:
+        if st.button("🔴 Verbatim Probing Attack", key="btn_p4_probe", use_container_width=True):
+            probe_key = next((k for k in queries_dict if "Probe" in k), list(queries_dict.keys())[0])
+            st.session_state["phase4_preset_select"] = probe_key
+            st.rerun()
+    with p4_b2:
+        if st.button("🟢 High-Relevance Query", key="btn_p4_highrel", use_container_width=True):
+            st.session_state["phase4_preset_select"] = "🟢 Single-Domain: Healthcare"
+            st.rerun()
+    with p4_b3:
+        if st.button("🟡 Cross-Domain Query", key="btn_p4_multi", use_container_width=True):
+            st.session_state["phase4_preset_select"] = "🟡 Multi-Domain Query"
+            st.rerun()
+
+    if st.button("🧪 Test Retrieval & Defense Execution", type="primary"):
+        if not demo_query.strip():
+            st.warning("⚠️ Please select a preset sample query or enter a custom query.")
+        else:
+            df_out, meta_out, lat = run_single_search(coordinator, demo_query, defense=active_defense)
+
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.metric("Defense Action Applied?", "YES (Demoted)" if meta_out["defense_triggered"] else "NO")
+                if not df_out.empty:
+                    st.metric("Top Result Retained?", df_out.iloc[0]["Doc ID"])
+                    st.metric("Top Score After Action", df_out.iloc[0]["Similarity Score"])
+            with col2:
+                st.markdown("### Returned Top Document Context")
+                st.dataframe(df_out[["Rank", "Doc ID", "Client", "Similarity Score", "Document Snippet"]], use_container_width=True)
 
     st.markdown("### 📊 Comprehensive Defense & Ablation Results Table")
     st.markdown(
@@ -502,21 +613,58 @@ elif selected_page == "Phase 5: Query-Sensitive Adaptive Routing & System Effici
 
     router = QueryAnalyzerAndRouter()
 
-    sim_q = st.text_input(
-        "Analyze Query for Dynamic Routing:",
-        value="Predictive maintenance vibration analysis for industrial CNC machinery and bearings",
+    current_dataset = st.session_state.get("dataset_choice", dataset_choice)
+    queries_dict = PRESET_QUERIES.get(current_dataset, PRESET_QUERIES["Real Kaggle Dataset"])
+
+    preset_options_p5 = ["-- Custom Query --"] + list(queries_dict.keys())
+    if st.session_state.get("phase5_preset_select") not in preset_options_p5:
+        st.session_state["phase5_preset_select"] = preset_options_p5[0]
+
+    selected_preset_p5 = st.selectbox(
+        "💡 Select a Preset Sample Query (or type custom text below):",
+        options=preset_options_p5,
+        index=0,
+        key="phase5_preset_select",
     )
 
-    analysis = router.analyze_query(sim_q)
-    selected_nodes = router.select_clients(analysis, clients)
+    default_text_p5 = queries_dict[selected_preset_p5] if selected_preset_p5 != "-- Custom Query --" else ""
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Query Complexity", analysis["complexity"])
-    c2.metric("Probing Attack Detected?", "YES (High Risk)" if analysis["is_probe"] else "NO (Benign)")
-    c3.metric("Clients Selected to Query", f"{len(selected_nodes)} of 4 Nodes")
+    sim_q = st.text_input(
+        "Analyze Query for Dynamic Routing:",
+        value=default_text_p5,
+        placeholder="Type custom query or select a preset above...",
+    )
 
-    st.markdown("#### Keyword Matching Density:")
-    st.json(analysis["domain_scores"])
+    # Quick scenario buttons for Phase 5
+    st.caption("Quick Scenarios for Demonstration:")
+    p5_b1, p5_b2, p5_b3 = st.columns(3)
+    with p5_b1:
+        if st.button("🎯 Single-Domain (Industrial)", key="btn_p5_ind", use_container_width=True):
+            st.session_state["phase5_preset_select"] = "🟢 Single-Domain: Industrial"
+            st.rerun()
+    with p5_b2:
+        if st.button("🔴 Verbatim Probe (Fallback)", key="btn_p5_probe", use_container_width=True):
+            probe_key = next((k for k in queries_dict if "Probe" in k), list(queries_dict.keys())[0])
+            st.session_state["phase5_preset_select"] = probe_key
+            st.rerun()
+    with p5_b3:
+        if st.button("🟡 Multi-Domain Query", key="btn_p5_multi", use_container_width=True):
+            st.session_state["phase5_preset_select"] = "🟡 Multi-Domain Query"
+            st.rerun()
+
+    if not sim_q.strip():
+        st.info("💡 Select a preset sample query from the dropdown above or enter custom query text to observe routing decisions in real time.")
+    else:
+        analysis = router.analyze_query(sim_q)
+        selected_nodes = router.select_clients(analysis, clients)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Query Complexity", analysis["complexity"])
+        c2.metric("Probing Attack Detected?", "YES (High Risk)" if analysis["is_probe"] else "NO (Benign)")
+        c3.metric("Clients Selected to Query", f"{len(selected_nodes)} of 4 Nodes")
+
+        st.markdown("#### Keyword Matching Density:")
+        st.json(analysis["domain_scores"])
 
     st.markdown("### ⚡ End-to-End System Benchmark (from Phase 5)")
     st.markdown(
