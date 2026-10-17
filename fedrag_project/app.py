@@ -50,40 +50,41 @@ st.set_page_config(
 # Custom CSS for dark mode metric card visibility
 st.markdown("""
 <style>
-    /* Metric Container Cards */
+    /* 1. Metric Container Box */
     div[data-testid="stMetric"], .metric-card {
-        background-color: #1E293B !important; /* Slate dark background */
+        background-color: #1E293B !important; /* Dark Slate Blue */
         border: 1px solid #334155 !important;
         border-radius: 10px !important;
         padding: 16px !important;
     }
-    
-    /* Metric Title / Label (FIX FOR DARK INVISIBLE TEXT) */
-    div[data-testid="stMetricLabel"],
-    div[data-testid="stMetricLabel"] label,
-    div[data-testid="stMetricLabel"] p,
-    div[data-testid="stMetricLabel"] span,
-    div[data-testid="stMetricLabel"] div {
-        color: #94A3B8 !important; /* Bright Slate Gray/White */
+
+    /* 2. Target ALL Label Child Elements (Fixes Invisible Titles) */
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricLabel"] *,
+    [data-testid="stMetricLabel"] label,
+    [data-testid="stMetricLabel"] p,
+    [data-testid="stMetricLabel"] div,
+    [data-testid="stMetricLabel"] span {
+        color: #CBD5E1 !important; /* Bright Light Slate White */
+        opacity: 1 !important;
         font-weight: 600 !important;
         font-size: 14px !important;
-        opacity: 1 !important;
+        visibility: visible !important;
     }
-    
-    /* Main Value Text inside Card */
-    div[data-testid="stMetricValue"],
-    div[data-testid="stMetricValue"] div,
-    div[data-testid="stMetricValue"] p,
-    div[data-testid="stMetricValue"] span {
+
+    /* 3. Target Main Big Number/Text */
+    [data-testid="stMetricValue"],
+    [data-testid="stMetricValue"] *,
+    [data-testid="stMetricValue"] div,
+    [data-testid="stMetricValue"] span {
         color: #FFFFFF !important; /* Pure White */
         font-size: 26px !important;
         font-weight: 700 !important;
     }
 
     /* Delta Indicators if present */
-    div[data-testid="stMetricDelta"] div,
-    div[data-testid="stMetricDelta"] span,
-    div[data-testid="stMetricDelta"] p {
+    div[data-testid="stMetricDelta"],
+    div[data-testid="stMetricDelta"] * {
         font-size: 13px !important;
     }
 
