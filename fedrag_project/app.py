@@ -378,35 +378,187 @@ elif selected_page == "Phase 3: MIRABEL Baseline Defense Reproduction":
         "threshold $\\tau$, MIRABEL triggers suppression by **completely deleting/purging** the top document."
     )
 
-    tau = st.slider("Select MIRABEL Threshold (\\tau):", 0.80, 0.95, 0.85, step=0.05)
+    tau = st.slider("Select MIRABEL Cutoff Threshold (τ):", 0.70, 0.99, 0.85, step=0.01)
     mirabel_defense = MIRABELDefense(threshold=tau)
 
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("#### Test High-Relevance Query against MIRABEL")
-        default_test_query = list(presets.values())[0]["query"]
-        test_q = st.text_input(
-            "Query with high semantic overlap:",
-            value=default_test_query,
-        )
-        if st.button("Inspect Query Response"):
-            df_undef, _, _ = run_single_search(coordinator, test_q, defense=None)
-            df_mir, meta_mir, _ = run_single_search(coordinator, test_q, defense=mirabel_defense)
+    # Threshold Controls & Query Input
+    current_dataset = st.session_state.get("dataset_choice", "Real Kaggle Dataset")
+    if current_dataset == "Real Kaggle Dataset":
+        default_p3_query = "A 58-year-old male presenting with acute ST-elevation myocardial infarction underwent primary percutaneous coronary intervention"
+    else:
+        default_p3_query = "Recommended clinical treatments and management strategies for type 2 diabetes include continuous glucose monitoring"
 
-            sub_col1, sub_col2 = st.columns(2)
-            with sub_col1:
-                st.markdown("**Undefended Response (Top Result):**")
-                if not df_undef.empty:
-                    st.info(f"Doc: {df_undef.iloc[0]['Doc ID']} (Score: {df_undef.iloc[0]['Similarity Score']})")
-            with sub_col2:
-                st.markdown("**MIRABEL Response:**")
-                if meta_mir["defense_triggered"]:
-                    st.error("⚠️ Document PURGED: Top candidate deleted from context.")
+    test_q = st.text_input(
+        "Enter High-Relevance or Extraction Probing Query:",
+        value=default_p3_query,
+        placeholder="Type query with high semantic overlap to test MIRABEL...",
+    )
+
+    st.button("🔍 Execute Before vs After Defense Comparison", type="primary")
+
+    if not test_q.strip():
+        st.warning("⚠️ Please enter a query string to evaluate MIRABEL.")
+    else:
+        df_undef, _, lat_undef = run_single_search(coordinator, test_q, defense=None)
+        df_mir, meta_mir, lat_mir = run_single_search(coordinator, test_q, defense=mirabel_defense)
+
+        st.markdown(f"**Retrieval Executed:** Undefended in `{lat_undef:.2f} ms` | MIRABEL in `{lat_mir:.2f} ms`")
+
+        # ---------------------------------------------------------------------
+        # Side-by-Side Comparison Columns
+        # ---------------------------------------------------------------------
+        col_before, col_after = st.columns(2)
+
+        # LEFT COLUMN: Before Defense (Undefended)
+        with col_before:
+            st.markdown("### 🟢 Before Defense (Undefended)")
+            st.markdown(
+                '<div style="background-color:#064E3B; border:1px solid #059669; border-radius:8px; padding:8px 14px; color:#A7F3D0; font-weight:700; margin-bottom:12px; display:inline-block;">'
+                '🟢 RETRIEVED SUCCESSFULLY'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            if not df_undef.empty:
+                top_doc_id = df_undef.iloc[0]["Doc ID"]
+                top_score = float(df_undef.iloc[0]["Raw Score"])
+                top_domain = df_undef.iloc[0]["Domain"]
+                top_client = df_undef.iloc[0]["Client"]
+                top_snippet = df_undef.iloc[0]["Document Snippet"]
+
+                st.markdown(
+                    f"""
+                    <div style="background-color:#1E293B; border:1px solid #334155; border-radius:10px; padding:16px; margin-bottom:14px;">
+                        <div style="font-size:1.15rem; font-weight:700; color:#F8FAFC;">Doc: <code>{top_doc_id}</code></div>
+                        <div style="color:#94A3B8; font-size:0.9rem; margin-top:4px;"><b>Source Node:</b> {top_client} ({top_domain})</div>
+                        <div style="color:#38BDF8; font-size:1.05rem; font-weight:600; margin-top:6px;">Cosine Similarity Score: <code>{top_score:.4f}</code></div>
+                        <div style="margin-top:10px; color:#E2E8F0; font-size:0.88rem; background-color:#0F172A; padding:10px; border-radius:6px; border-left:3px solid #10B981;">
+                            <b>Document Text Snippet:</b><br/>{top_snippet[:220]}...
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("**Simulated LLM Generator Context Input:**")
+                st.info(f"✅ Context available: Ground-truth candidate `{top_doc_id}` passed to generation model. Generates faithful factual response.")
+            else:
+                st.warning("No documents retrieved in undefended search.")
+
+            st.markdown("#### 📋 Top Candidates Context (Undefended)")
+            st.dataframe(
+                df_undef[["Rank", "Doc ID", "Client", "Similarity Score", "Document Snippet"]],
+                use_container_width=True,
+            )
+
+        # RIGHT COLUMN: After MIRABEL Defense
+        with col_after:
+            st.markdown(f"### 🛡️ After MIRABEL Defense (τ = {tau:.2f})")
+            if meta_mir["defense_triggered"]:
+                purged_doc_id = df_undef.iloc[0]["Doc ID"] if not df_undef.empty else "N/A"
+                raw_score = float(df_undef.iloc[0]["Raw Score"]) if not df_undef.empty else 1.0
+
+                st.markdown(
+                    '<div style="background-color:#7F1D1D; border:1px solid #DC2626; border-radius:8px; padding:8px 14px; color:#FECACA; font-weight:700; margin-bottom:12px; display:inline-block;">'
+                    '🔴 PURGED / EXCLUDED FROM CONTEXT'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"""
+                    <div style="background-color:#1E293B; border:1px solid #EF4444; border-radius:10px; padding:16px; margin-bottom:14px;">
+                        <div style="font-size:1.15rem; font-weight:700; color:#F87171;">Purged Doc: <code>{purged_doc_id}</code></div>
+                        <div style="color:#FCA5A5; font-size:0.95rem; margin-top:4px;"><b>Action:</b> Candidate Removed from Context</div>
+                        <div style="color:#F87171; font-size:1.05rem; font-weight:600; margin-top:6px;">Original Similarity Score: <code>{raw_score:.4f}</code> (≥ Cutoff {tau:.2f})</div>
+                        <div style="margin-top:10px; color:#FECACA; font-size:0.88rem; background-color:#450A0A; padding:10px; border-radius:6px; border-left:3px solid #EF4444;">
+                            ⚠️ <b>Suppression Triggered:</b> Top candidate exceeded similarity threshold $\\tau={tau:.2f}$. Deleted from context payload to thwart MIA probing.
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                if df_mir.empty:
+                    st.warning("⚠️ No candidates remain in generation context.")
                 else:
-                    st.success("✅ Defense Not Triggered.")
+                    new_top = df_mir.iloc[0]["Doc ID"]
+                    new_score = df_mir.iloc[0]["Similarity Score"]
+                    st.caption(f"Next remaining candidate shifted up to Rank 1: `{new_top}` (Score: {new_score})")
 
-    with colB:
-        st.markdown("#### Benchmark Metrics (from Phase 3)")
+                st.markdown("**Simulated LLM Generator Output:**")
+                st.error("❌ **Answer: \"I don't know\"** *(Generation failed due to missing context)*")
+            else:
+                top_doc_id = df_mir.iloc[0]["Doc ID"] if not df_mir.empty else "N/A"
+                top_score = float(df_mir.iloc[0]["Raw Score"]) if not df_mir.empty else 0.0
+
+                st.markdown(
+                    '<div style="background-color:#1E3A8A; border:1px solid #3B82F6; border-radius:8px; padding:8px 14px; color:#BFDBFE; font-weight:700; margin-bottom:12px; display:inline-block;">'
+                    '🟢 NOT TRIGGERED / CONTEXT RETAINED'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"""
+                    <div style="background-color:#1E293B; border:1px solid #334155; border-radius:10px; padding:16px; margin-bottom:14px;">
+                        <div style="font-size:1.15rem; font-weight:700; color:#F8FAFC;">Doc: <code>{top_doc_id}</code></div>
+                        <div style="color:#94A3B8; font-size:0.95rem; margin-top:4px;"><b>Action:</b> Candidate Kept in Context (Sub-threshold)</div>
+                        <div style="color:#38BDF8; font-size:1.05rem; font-weight:600; margin-top:6px;">Cosine Similarity Score: <code>{top_score:.4f}</code> (< Cutoff {tau:.2f})</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("**Simulated LLM Generator Output:**")
+                st.success("✅ Context preserved: Generator produces factual response.")
+
+            st.markdown("#### 📋 Top Candidates Context (After MIRABEL)")
+            if not df_mir.empty:
+                st.dataframe(
+                    df_mir[["Rank", "Doc ID", "Client", "Similarity Score", "Document Snippet"]],
+                    use_container_width=True,
+                )
+            else:
+                st.warning("⚠️ All candidates were pruned or suppressed.")
+
+        # ---------------------------------------------------------------------
+        # Dedicated Suppression Audit Log Container
+        # ---------------------------------------------------------------------
+        st.markdown("---")
+        st.markdown("### 📋 Suppression Audit Log")
+        
+        target_doc_id = df_undef.iloc[0]["Doc ID"] if not df_undef.empty else "N/A"
+        raw_cosine = float(df_undef.iloc[0]["Raw Score"]) if not df_undef.empty else 0.0
+        is_triggered = meta_mir["defense_triggered"]
+
+        if is_triggered:
+            rule_str = f"Raw Score ({raw_cosine:.4f}) ≥ Threshold ({tau:.4f})"
+            context_status = "EXCLUDED from LLM Generation Context"
+            utility_impact = "Recall@5 = 0.0000 (Ground-Truth Answer Lost)"
+        else:
+            rule_str = f"Raw Score ({raw_cosine:.4f}) < Threshold ({tau:.4f})"
+            context_status = "RETAINED in LLM Generation Context"
+            utility_impact = "Recall@5 = 1.0000 (Ground-Truth Answer Preserved)"
+
+        audit_log_text = f"""-------------------------------------------------
+• Target Document ID    : {target_doc_id}
+• Raw Cosine Score      : {raw_cosine:.4f}
+• Configured Cutoff (τ) : {tau:.4f}
+• Rule Evaluated        : {rule_str}
+• Storage Status        : Retained in Local FAISS Storage (Unmodified)
+• Context Status        : {context_status}
+• Search Utility Impact : {utility_impact}
+-------------------------------------------------"""
+
+        st.code(audit_log_text, language="text")
+
+    # -------------------------------------------------------------------------
+    # Benchmark Metrics & Theoretical Explanation
+    # -------------------------------------------------------------------------
+    st.markdown("### 📊 Benchmark Metrics (from Phase 3 Evaluation)")
+    col_bench1, col_bench2 = st.columns([1, 1])
+    with col_bench1:
         st.markdown(
             """
             | Configuration | MIA ROC-AUC | TPR @ 1% FPR | Recall@5 | Benign FPR |
@@ -417,12 +569,14 @@ elif selected_page == "Phase 3: MIRABEL Baseline Defense Reproduction":
             | **MIRABEL (τ=0.90)** | `0.9805` | `96.88%` | **0.0000** | `0.00%` |
             """
         )
-
-    st.error(
-        "❌ **THE MIRABEL PRIVACY-UTILITY COLLAPSE:** "
-        "Because MIRABEL purges top candidate documents whenever $s \\ge \\tau$, **Recall@5 and nDCG@5 collapse to 0.0000**. "
-        "Meanwhile, partial-clause probing queries scoring $< \\tau$ evade detection, leaving ROC-AUC at 0.9746."
-    )
+    with col_bench2:
+        st.error(
+            "❌ **THE MIRABEL PRIVACY-UTILITY COLLAPSE:**\n\n"
+            "Because MIRABEL purges top candidate documents whenever $s \\ge \\tau$, "
+            "**Recall@5 and nDCG@5 collapse to 0.0000**. "
+            "The ground-truth document is permanently withheld from the generator, causing hallucinatory or 'I don't know' generation failures. "
+            "Meanwhile, sub-threshold partial-clause probing queries still score $< \\tau$, allowing attackers to leak membership."
+        )
 
 
 # =============================================================================
